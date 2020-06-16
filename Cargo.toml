@@ -1,0 +1,11 @@
+[package]
+name = "sbus-parser"
+version = "0.0.1"
+authors = ["qiuchengxuan <qiuchengxuan@gmail.com>"]
+edition = "2018"
+
+description = "Futaba SBUS parser using loop and byte swap"
+keywords = ["SBUS", "no-std", "embedded"]
+license = "MIT"
+
+[dependencies]
