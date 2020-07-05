@@ -1,5 +1,8 @@
-#![no_std]
-#![feature(test)]
+#![cfg_attr(not(test), no_std)]
+
+#[cfg(test)]
+#[macro_use]
+extern crate hex_literal;
 
 #[derive(Default, PartialEq, Debug)]
 pub struct SbusData {
@@ -14,7 +17,7 @@ pub struct SbusData {
 pub struct SbusPacket {
     _padding: u8,
     header: u8,
-    channel_octets: [u16; 11],
+    channel_words: [u16; 11],
     digital_and_flags: u8,
     footer: u8,
 }
@@ -24,21 +27,18 @@ pub const SBUS_PACKET_SIZE: usize = core::mem::size_of::<SbusPacket>() - 1;
 
 pub fn is_sbus_packet_end(byte: u8) -> bool {
     match byte {
-        0x0 => true,
-        0x4 => true,
-        0x14 => true,
-        0x24 => true,
-        0x34 => true,
+        0x0 => true,  // S.BUS 1
+        0x4 => true,  // S.BUS 2 receiver voltage
+        0x14 => true, // S.BUS 2 GPS/baro
+        0x24 => true, // Unknown SBUS2 data
+        0x34 => true, // Unknown SBUS2 data
         _ => false,
     }
 }
 
 impl SbusPacket {
-    pub fn from_bytes<'a>(bytes: &'a [u8]) -> Option<&Self> {
-        if bytes.len() < SBUS_PACKET_SIZE {
-            return None;
-        }
-        Some(unsafe { &*(&bytes[0] as *const u8 as *const SbusPacket) })
+    pub fn from_bytes<'a>(bytes: &'a [u8; SBUS_PACKET_SIZE + 1]) -> Option<&Self> {
+        Some(unsafe { core::mem::transmute(bytes) })
     }
 
     pub fn try_parse(&self) -> Option<SbusData> {
@@ -55,8 +55,8 @@ impl SbusPacket {
         let mut data = SbusData::default();
         let mut bits: u32 = 0;
         for i in 0..16 {
-            let octet = u16::from_le(self.channel_octets[INDEX[i] as usize]) as u32;
-            bits |= octet << (SHIFT[i] as usize);
+            let word = u16::from_le(self.channel_words[INDEX[i] as usize]) as u32;
+            bits |= word << (SHIFT[i] as usize);
             data.channels[i] = bits as u16 & ((1 << 11) - 1);
             bits >>= 11;
         }
@@ -71,20 +71,16 @@ impl SbusPacket {
 
 #[cfg(test)]
 mod tests {
-
-    extern crate test;
-    use test::Bencher;
-
     #[test]
     fn test_sbus() {
         use super::{SbusData, SbusPacket, SBUS_PACKET_SIZE};
 
         assert_eq!(SBUS_PACKET_SIZE, 25);
-        let bytes: [u8; SBUS_PACKET_SIZE + 1] = [
-            0x00, 0x0F, 0xE0, 0x03, 0x1F, 0x58, 0xC0, 0x07, 0x16, 0xB0, 0x80, 0x05, 0x2C, 0x60,
-            0x01, 0x0B, 0xF8, 0xC0, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00,
-        ];
-        let sbus_packet: &SbusPacket = SbusPacket::from_bytes(&bytes[..]).unwrap();
+        let bytes: [u8; SBUS_PACKET_SIZE + 1] = hex!(
+            "00 0F E0 03 1F 58 C0 07 16 B0 80 05 2C 60
+             01 0B F8 C0 07 00 00 00 00 00 03 00"
+        );
+        let sbus_packet: &SbusPacket = SbusPacket::from_bytes(&bytes).unwrap();
         let result = sbus_packet.try_parse();
         assert_eq!(
             result,
@@ -96,17 +92,5 @@ mod tests {
                 failsafe: false,
             })
         )
-    }
-
-    #[bench]
-    fn bench_sbus(b: &mut Bencher) {
-        use super::{SbusPacket, SBUS_PACKET_SIZE};
-
-        let bytes: [u8; SBUS_PACKET_SIZE + 1] = [
-            0x00, 0x0F, 0xE0, 0x03, 0x1F, 0x58, 0xC0, 0x07, 0x16, 0xB0, 0x80, 0x05, 0x2C, 0x60,
-            0x01, 0x0B, 0xF8, 0xC0, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00,
-        ];
-        let sbus_packet: &SbusPacket = SbusPacket::from_bytes(&bytes[..]).unwrap();
-        b.iter(|| sbus_packet.parse());
     }
 }

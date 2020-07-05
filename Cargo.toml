@@ -1,6 +1,6 @@
 [package]
 name = "sbus-parser"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["qiuchengxuan <qiuchengxuan@gmail.com>"]
 edition = "2018"
 
@@ -9,3 +9,6 @@ keywords = ["SBUS", "no-std", "embedded"]
 license = "MIT"
 
 [dependencies]
+
+[dev-dependencies]
+hex-literal = "0.3"
