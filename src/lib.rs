@@ -68,51 +68,56 @@ impl Receiver {
         Self { packet: [0u8; 1 + SBUS_PACKET_SIZE], size: 0 }
     }
 
-    fn continue_receive(&mut self, bytes: &[u8]) -> Option<Data> {
-        let offset = SBUS_PACKET_SIZE - self.size;
-        if is_sbus_packet_end(bytes[offset - 1]) {
-            self.packet[1 + self.size..].copy_from_slice(&bytes[..offset]);
-            self.size = 0;
-            let packet: &Packet = unsafe { core::mem::transmute(&self.packet) };
-            return Some(packet.parse());
+    fn find_partial_packet(&mut self, bytes: &[u8]) {
+        for i in 0..bytes.len() {
+            if bytes[i] == SBUS_PACKET_BEGIN {
+                self.size = bytes.len() - i;
+                self.packet[1..1 + self.size].copy_from_slice(&bytes[i..]);
+                break;
+            }
         }
-        for i in 1..self.size {
-            let size = self.size - i;
+    }
+
+    fn continue_receive(&mut self, bytes: &[u8]) -> Option<Data> {
+        let packet = &mut self.packet[1..];
+        for offset in 0..self.size {
+            if packet[offset] != SBUS_PACKET_BEGIN {
+                continue;
+            }
+            let size = self.size - offset;
             let remain_size = SBUS_PACKET_SIZE - size;
-            let last = bytes[remain_size - 1];
-            if self.packet[1 + i] == SBUS_PACKET_BEGIN && is_sbus_packet_end(last) {
-                self.packet.copy_within(1 + i..1 + self.size, 1);
-                self.packet[1 + size..].copy_from_slice(&bytes[..remain_size]);
-                self.size = 0;
+            if is_sbus_packet_end(bytes[remain_size - 1]) {
+                packet.copy_within(offset..self.size, 0);
+                packet[size..].copy_from_slice(&bytes[..remain_size]);
                 let packet: &Packet = unsafe { core::mem::transmute(&self.packet) };
-                return Some(packet.parse());
+                let data = Some(packet.parse());
+                self.size = 0;
+                self.find_partial_packet(&bytes[remain_size..]);
+                return data;
             }
         }
         self.size = 0;
         None
     }
 
-    // Assuming only one or none SBUS packet exists
+    /// Must be chunk of SBUS PACKET SIZE or less
     pub fn receive(&mut self, bytes: &[u8]) -> Option<Data> {
-        assert!(bytes.len() >= SBUS_PACKET_SIZE);
+        assert!(bytes.len() <= SBUS_PACKET_SIZE);
         if self.size > 0 {
             if let Some(data) = self.continue_receive(bytes) {
                 return Some(data);
             }
         }
-        for i in 0..bytes.len() {
-            if bytes[i] == SBUS_PACKET_BEGIN {
-                if i + SBUS_PACKET_SIZE <= bytes.len() {
-                    self.packet[1..].copy_from_slice(&bytes[i..i + SBUS_PACKET_SIZE]);
-                    let packet: &Packet = unsafe { core::mem::transmute(&self.packet) };
-                    return Some(packet.parse());
-                } else {
-                    self.size = bytes.len() - i;
-                    self.packet[1..1 + self.size].copy_from_slice(&bytes[i..]);
-                    break;
-                }
+        let mut index = 0;
+        if bytes.len() == SBUS_PACKET_SIZE {
+            if bytes[0] == SBUS_PACKET_BEGIN && is_sbus_packet_end(bytes[SBUS_PACKET_SIZE - 1]) {
+                self.packet[1..].copy_from_slice(bytes);
+                let packet: &Packet = unsafe { core::mem::transmute(&self.packet) };
+                return Some(packet.parse());
             }
+            index = 1;
         }
+        self.find_partial_packet(&bytes[index..]);
         None
     }
 }
@@ -120,7 +125,7 @@ impl Receiver {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn test_sbus() {
+    fn test_sbus_packet() {
         use super::{Data, Packet, SBUS_PACKET_SIZE};
 
         assert_eq!(SBUS_PACKET_SIZE, 25);
@@ -159,6 +164,17 @@ mod tests {
         let mut receiver = Receiver::new();
         let bytes: [u8; SBUS_PACKET_SIZE] =
             hex!("FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF");
+        assert!(receiver.receive(&bytes).is_none());
+        assert_eq!(receiver.size, 0);
+    }
+
+    #[test]
+    fn test_footer_not_sbus() {
+        use super::{Receiver, SBUS_PACKET_SIZE};
+
+        let mut receiver = Receiver::new();
+        let bytes: [u8; SBUS_PACKET_SIZE] =
+            hex!("0F 00 FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF 01");
         assert!(receiver.receive(&bytes).is_none());
         assert_eq!(receiver.size, 0);
     }
