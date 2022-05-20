@@ -87,6 +87,8 @@ impl Receiver {
 
 #[cfg(test)]
 mod tests {
+    use hex_literal::hex;
+
     use crate::packet::SBUS_PACKET_SIZE;
 
     const SBUS_SAMPLE_PACKET: [u8; SBUS_PACKET_SIZE] =
